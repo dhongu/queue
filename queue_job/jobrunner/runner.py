@@ -31,6 +31,7 @@ import requests
 from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
 
 import odoo
+from odoo.modules.db import list_dbs
 from odoo.tools import config
 
 from . import queue_job_config
@@ -380,7 +381,7 @@ class QueueJobRunner:
         db_names = config["db_name"]
         if db_names:
             return db_names
-        return odoo.service.db.list_dbs(True)
+        return list_dbs(force=True)
 
     def close_databases(self, remove_jobs=True):
         for db_name, db in self.db_by_name.items():

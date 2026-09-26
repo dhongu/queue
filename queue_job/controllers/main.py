@@ -13,7 +13,6 @@ from psycopg2 import OperationalError, errorcodes
 from werkzeug.exceptions import BadRequest, Forbidden
 
 from odoo import SUPERUSER_ID, api, http
-from odoo.service.model import PG_CONCURRENCY_ERRORS_TO_RETRY
 from odoo.tools import config
 
 from ..delay import chain, group
@@ -23,6 +22,14 @@ from ..job import ENQUEUED, Job
 _logger = logging.getLogger(__name__)
 
 PG_RETRY = 5  # seconds
+
+# odoo.service.model.PG_CONCURRENCY_ERRORS_TO_RETRY was removed in 20.0
+# (odoo.sql_db only exposes the exception classes now)
+PG_CONCURRENCY_ERRORS_TO_RETRY = (
+    errorcodes.LOCK_NOT_AVAILABLE,
+    errorcodes.SERIALIZATION_FAILURE,
+    errorcodes.DEADLOCK_DETECTED,
+)
 
 DEPENDS_MAX_TRIES_ON_CONCURRENCY_FAILURE = 5
 
@@ -148,7 +155,7 @@ class RunJobController(http.Controller):
     @classmethod
     def _runjob(cls, env: api.Environment, job: Job) -> None:
         def retry_postpone(job, message, seconds=None):
-            job.env.clear()
+            job.env.transaction.clear()
             with job.in_temporary_env():
                 job.postpone(result=message, seconds=seconds)
                 job.set_pending(reset_retry=False)
@@ -181,7 +188,7 @@ class RunJobController(http.Controller):
             traceback.print_exc(file=buff)
             traceback_txt = buff.getvalue()
             _logger.error(traceback_txt)
-            job.env.clear()
+            job.env.transaction.clear()
             with job.in_temporary_env():
                 vals = cls._get_failure_values(job, traceback_txt, orig_exception)
                 job.set_failed(**vals)

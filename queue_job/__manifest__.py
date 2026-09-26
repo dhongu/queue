@@ -2,7 +2,7 @@
 
 {
     "name": "Job Queue",
-    "version": "19.0.2.0.1",
+    "version": "20.0.2.0.1",
     "author": "Camptocamp,ACSONE SA/NV,Odoo Community Association (OCA)",
     "website": "https://github.com/OCA/queue",
     "license": "LGPL-3",
@@ -11,7 +11,7 @@
     "external_dependencies": {"python": ["requests"]},
     "data": [
         "security/security.xml",
-        "security/ir.model.access.csv",
+        "security/ir.access.csv",
         "views/queue_job_views.xml",
         "views/queue_job_channel_views.xml",
         "views/queue_job_function_views.xml",
