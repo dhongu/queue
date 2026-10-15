@@ -96,6 +96,21 @@ Known issues / Roadmap
 - Commit transaction after job state updated to started. (See
   ``_process``)
 
+Changelog
+=========
+
+20.0.1.0.1 (2026-10-15)
+-----------------------
+
+Bugfixes
+~~~~~~~~
+
+- A job raising ``RetryableJobError(seconds=N)`` is now postponed by
+  ``N`` seconds, and without ``seconds`` the retry pattern of the job
+  function applies, as with the standard job runner. Before, the cron
+  runner always postponed it by 5 seconds (still the delay when neither
+  is set).
+
 Bug Tracker
 ===========
 
