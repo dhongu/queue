@@ -13,6 +13,7 @@ from psycopg2 import OperationalError, errorcodes
 from werkzeug.exceptions import BadRequest, Forbidden
 
 from odoo import SUPERUSER_ID, api, http
+from odoo.sql_db import PG_CONCURRENCY_EXCEPTIONS_TO_RETRY
 from odoo.tools import config
 
 from ..delay import chain, group
@@ -22,14 +23,6 @@ from ..job import ENQUEUED, Job
 _logger = logging.getLogger(__name__)
 
 PG_RETRY = 5  # seconds
-
-# odoo.service.model.PG_CONCURRENCY_ERRORS_TO_RETRY was removed in 20.0
-# (odoo.sql_db only exposes the exception classes now)
-PG_CONCURRENCY_ERRORS_TO_RETRY = (
-    errorcodes.LOCK_NOT_AVAILABLE,
-    errorcodes.SERIALIZATION_FAILURE,
-    errorcodes.DEADLOCK_DETECTED,
-)
 
 DEPENDS_MAX_TRIES_ON_CONCURRENCY_FAILURE = 5
 
@@ -105,10 +98,14 @@ class RunJobController(http.Controller):
         # TODO refactor, the relation between env and job.env is not clear
         assert env.cr is job.env.cr
         with _prevent_commit(env.cr):
-            job.perform()
-            # Triggers any stored computed fields before calling 'set_done'
-            # so that will be part of the 'exec_time'
-            env.flush_all()
+            # On failure, rolling back the savepoint releases the row locks
+            # the job took on the records it updated: the failure is handled
+            # from another cursor, which may write on the same records (e.g.
+            # the on fail hook).
+            # On success, leaving the savepoint flushes, before 'set_done', so
+            # that the stored computed fields are part of the 'exec_time'.
+            with env.cr.savepoint():
+                job.perform()
             job.set_done()
             job.store()
             env.flush_all()
@@ -130,7 +127,7 @@ class RunJobController(http.Controller):
             except OperationalError as err:
                 # Automatically retry the typical transaction serialization
                 # errors
-                if err.pgcode not in PG_CONCURRENCY_ERRORS_TO_RETRY:
+                if not isinstance(err, PG_CONCURRENCY_EXCEPTIONS_TO_RETRY):
                     raise
                 if tries >= DEPENDS_MAX_TRIES_ON_CONCURRENCY_FAILURE:
                     _logger.error(
@@ -167,7 +164,7 @@ class RunJobController(http.Controller):
             except OperationalError as err:
                 # Automatically retry the typical transaction serialization
                 # errors
-                if err.pgcode not in PG_CONCURRENCY_ERRORS_TO_RETRY:
+                if not isinstance(err, PG_CONCURRENCY_EXCEPTIONS_TO_RETRY):
                     raise
 
                 _logger.debug("%s OperationalError, postponed", job)
@@ -193,6 +190,7 @@ class RunJobController(http.Controller):
                 vals = cls._get_failure_values(job, traceback_txt, orig_exception)
                 job.set_failed(**vals)
                 job.store()
+                job.on_fail(vals)
                 buff.close()
             raise
 
@@ -220,9 +218,9 @@ class RunJobController(http.Controller):
         save_session=False,
         readonly=False,
     )
-    def runjob(self, db, job_uuid, **kw):
-        http.request.session.db = db
-        env = http.request.env(user=SUPERUSER_ID)
+    def runjob(self, job_uuid, **kw):
+        http.request.update_env(user=SUPERUSER_ID)
+        env = http.request.env
         job = self._acquire_job(env, job_uuid)
         if not job:
             return ""
@@ -394,6 +392,5 @@ class RunJobController(http.Controller):
 
         root_delayable.delay()
 
-        return (
-            f"graph uuid: {list(root_delayable._head())[0]._generated_job.graph_uuid}"
-        )
+        head = next(iter(root_delayable._head()))
+        return f"graph uuid: {head._generated_job.graph_uuid}"

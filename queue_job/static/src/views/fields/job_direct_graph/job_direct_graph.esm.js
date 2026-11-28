@@ -158,7 +158,7 @@ class JobDirectGraph extends Component {
     async openDependencyJob(resId) {
         const action = await this.orm.call(
             this.model,
-            "get_formview_action",
+            "get_record_default_action",
             [[resId]],
             {
                 context: this.context,
